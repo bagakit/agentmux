@@ -14,7 +14,7 @@ function fixture() {
     config: { workspaces: [{ id: SCRATCH_WORKSPACE_ID }], browser: {} },
     layouts: { [SCRATCH_WORKSPACE_ID]: { activeGroupId: 'scratch-group', groups: [{ id: 'scratch-group', tabOrder: ['original'] }] } },
     tabs: { original: { id: 'original', workspaceId: SCRATCH_WORKSPACE_ID, regions: { original } } },
-    mainSurface: 'workbench', surveyZoneSelection: null, surveyProfileView: { kind: 'default' },
+    mainSurface: 'workbench', surveyPageOpening: null, surveyZoneSelection: null, surveyProfileView: { kind: 'default' },
     surveyPageReferences: [],
     setSurveyZoneCollected: vi.fn(() => true),
     openLauncher: vi.fn(() => { state.tabs['new-tab'] = { id: 'new-tab', space: { zoneId: 'new-survey-zone' }, layout: { activeRegionId: 'new-region' }, regions: { 'new-region': { kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'new-region' } } }; return 'new-tab' }),
@@ -28,6 +28,7 @@ function fixture() {
       state.surveyPageReferences = [...state.surveyPageReferences, reference]; onApplied(state.surveyPageReferences)
       return { outcome: 'registered', reference, save: null, issues: [] }
     }),
+    setSurveyPageOpening: vi.fn((value: unknown) => { state.surveyPageOpening = value }),
     setSurveyZoneSelection: vi.fn((value: unknown) => { state.surveyZoneSelection = value }),
     setMainSurface: vi.fn((value: string) => { state.mainSurface = value })
   }
@@ -85,13 +86,31 @@ it.each([false, true])('a held default Profile read shows Survey promptly and re
     expect(f.read).toHaveBeenCalledOnce()
     expect(f.state.mainSurface).toBe('survey')
     expect(f.state.surveyZoneSelection).toBeNull()
+    expect(f.state.surveyPageOpening).toEqual({ url: request.url })
     expect(f.state.createBrowser).not.toHaveBeenCalled()
-    if (move) f.move()
+    if (move) { f.move(); expect(f.state.surveyPageOpening).toBeNull() }
   } finally { release() }
   expect(await opening).toMatchObject({ state: 'opened', browserId: f.page.browserId })
   expect(f.state.mainSurface).toBe(move ? 'workbench' : 'survey')
+  expect(f.state.surveyPageOpening).toBeNull()
   expect(f.state.surveyZoneSelection).toEqual(move ? null : { kind: 'page', ...f.page })
   expect(f.state.createBrowser).not.toHaveBeenCalled()
+})
+
+it('aborting an original Profile read removes its opening state immediately without changing the original page', async () => {
+  const f = existingPage(), controller = new AbortController()
+  let release!: () => void
+  f.read.mockReturnValueOnce(new Promise<void>(resolve => { release = resolve }))
+  const opening = openSystemUrlInSurvey(f.host, request, controller.signal)
+  try {
+    expect(f.state.surveyPageOpening).toEqual({ url: request.url })
+    controller.abort()
+    expect(f.state.surveyPageOpening).toBeNull()
+    expect(f.state.surveyZoneSelection).toBeNull()
+  } finally { release() }
+  expect(await opening).toMatchObject({ state: 'unconfirmed', browserId: null })
+  expect(f.state.createBrowser).not.toHaveBeenCalled()
+  expect(f.listeners.size).toBe(0)
 })
 
 it.each(['query', 'fragment', 'profile', 'private', 'location', 'disabled'] as const)(
@@ -135,6 +154,8 @@ it('failed creation retains its original Survey reference and does not retry or 
   const f = fixture(); f.state.createBrowser.mockRejectedValueOnce(new Error('Original native create failed'))
   expect(await openSystemUrlInSurvey(f.host, request, new AbortController().signal)).toMatchObject({ state: 'unconfirmed', reference: { tabId: 'new-tab', regionId: 'new-region' }, message: expect.stringContaining('Original native create failed') })
   expect(f.state.createBrowser).toHaveBeenCalledTimes(1); expect(f.state.tabs['new-tab'].regions['new-region'].kind).toBe('launcher')
+  expect(f.state.surveyPageOpening).toBeNull()
+  expect(f.state.surveyZoneSelection).toMatchObject({ zoneId: 'new-survey-zone', active: { tabId: 'new-tab', regionId: 'new-region' } })
   expect(f.state.tabs.original.regions.original).toBe(f.original); expect(f.listeners.size).toBe(0)
 })
 

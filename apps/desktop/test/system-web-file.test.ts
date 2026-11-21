@@ -53,7 +53,7 @@ function fixture() {
   const listeners = new Set<() => void>(), original = { kind: 'file', path: '/original/draft.txt', draft: 'Keep original draft' }
   const state: any = {
     config: { workspaces: [{ id: SCRATCH_WORKSPACE_ID }], browser: {} }, layouts: { [SCRATCH_WORKSPACE_ID]: { activeGroupId: 'scratch-group' } }, tabs: { original: { regions: { original } } },
-    mainSurface: 'recall', recallNotebookId: 'original-book', recallNoteId: 'original-note', recallZoneSelection: null, surveyZoneSelection: null,
+    mainSurface: 'recall', recallNotebookId: 'original-book', recallNoteId: 'original-note', recallZoneSelection: null, surveyPageOpening: null, surveyZoneSelection: null,
     surveyPageReferences: [], setSurveyZoneCollected: vi.fn(() => true),
     openLauncher: vi.fn(() => { state.tabs['new-tab'] = { id: 'new-tab', space: { zoneId: 'exact-zone' }, layout: { activeRegionId: 'new-region' }, regions: { 'new-region': { kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'new-region' } } }; return 'new-tab' }),
     createBrowser: vi.fn(async (_group: string, location: { tabId: string; regionId: string }, url: string, _bookmark: unknown, workspaceId: string,
@@ -66,6 +66,7 @@ function fixture() {
       state.surveyPageReferences = [...state.surveyPageReferences, reference]; onApplied(state.surveyPageReferences)
       return { outcome: 'registered', reference, save: null, issues: [] }
     }),
+    setSurveyPageOpening: vi.fn(value => { state.surveyPageOpening = value }),
     setSurveyZoneSelection: vi.fn(value => { state.surveyZoneSelection = value }), setMainSurface: vi.fn(value => { state.mainSurface = value })
   }
   const get = () => state
@@ -151,6 +152,7 @@ it('file preparation failure retains its exact page and later user navigation is
   const surfaces = second.state.setMainSurface.mock.calls.length; finish()
   await until(() => second.replies.length === 1)
   expect(second.state.setMainSurface).toHaveBeenCalledTimes(surfaces); expect(second.state.mainSurface).toBe('recall')
+  expect(second.state.surveyPageOpening).toBeNull()
   expect(second.state.recallNoteId).toBe('later-user-reading'); expect(second.state.tabs.original.regions.original).toBe(second.original)
 })
 it('file bridge waits the original Browser budget and cancels only that observation', async () => {

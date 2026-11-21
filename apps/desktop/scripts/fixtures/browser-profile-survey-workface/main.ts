@@ -118,19 +118,19 @@ async function run() {
  const completeObserver=['complete','context-menu','address-selection'].includes(selectedCase)?completePorts(receipt):null
  const completeReaders:ReturnType<typeof cliFollow>[]=[]
  let holdProbeAck=false, releaseProbeAck: ((lose:boolean)=>void)|undefined
- let surveyProfileRead: { acknowledge(): void; resume: Promise<void>; release(): void } | undefined
- const holdSurveyProfileRead = () => {
-  let acknowledge!: () => void, resolveRead!: () => void
+ let surveyReply: { channel: string; acknowledge(): void; resume: Promise<void>; release(): void } | undefined
+ const holdSurveyReply = (channel: 'browser:readProfiles' | 'browser:create') => {
+  let acknowledge!: () => void, resolveReply!: () => void
   const arrived = new Promise<void>(resolve => { acknowledge = resolve })
-  const resume = new Promise<void>(resolve => { resolveRead = resolve })
-  const release = () => { surveyProfileRead = undefined; resolveRead() }
-  surveyProfileRead = { acknowledge, resume, release }
+  const resume = new Promise<void>(resolve => { resolveReply = resolve })
+  const release = () => { surveyReply = undefined; resolveReply() }
+  surveyReply = { channel, acknowledge, resume, release }
   return { arrived, release }
  }
  let releaseAddressDetails: (() => void) | undefined
  const releaseDetails = () => { receipt.addressDetailsReleased = true; releaseAddressDetails?.() }
  const probeAck={hold(){holdProbeAck=true},release(lose:boolean){releaseProbeAck?.(lose)}}
- releaseObservationFaults=()=>{switchPorts?.dispose();completeObserver?.dispose();for(const reader of completeReaders)void reader.dispose();rejectSurveyWrites=false;loseProfileDirectoryAck=false;probeAck.release(false);surveyProfileRead?.release()}
+ releaseObservationFaults=()=>{switchPorts?.dispose();completeObserver?.dispose();for(const reader of completeReaders)void reader.dispose();rejectSurveyWrites=false;loseProfileDirectoryAck=false;probeAck.release(false);surveyReply?.release()}
  const userState=new WorkbenchUserStateStore(join(directory,'workbench-user-state.json'))
  const originalSend=contents.send.bind(contents);contents.send=(channel,...args)=>{completeObserver?.event(channel,args);if(loseProfileDirectoryAck&&channel==='browser:profilesChanged'){receipt.droppedProfileListPushes=(receipt.droppedProfileListPushes??0)+1;return}if(switchPorts?.observeSend(channel,args,originalSend))return;originalSend(channel,...args)}
  const originalHandle=ipcMain.handle.bind(ipcMain);ipcMain.handle=(channel,handler)=>originalHandle(channel,async(event,...args)=>{
@@ -155,9 +155,10 @@ async function run() {
   if(channel==='browser:create'&&rejectSurveyWrites)rejectedSurveyBrowserId=observed.id
   if(channel==='browser:choosePageMenu')(receipt.pageMenuChoices??=[]).push({choice:args[1],accepted:observed})
   if(['browser:listProfiles','browser:readProfiles'].includes(channel)&&loseProfileDirectoryAck)throw new Error('Private fixture lost the original Profile directory read ACK')
-  if (channel === 'browser:readProfiles' && surveyProfileRead) {
-   surveyProfileRead.acknowledge()
-   await surveyProfileRead.resume
+  const reply = surveyReply
+  if (reply?.channel === channel) {
+   reply.acknowledge()
+   await reply.resume
   }
   if(channel==='browser:probeProfileNetwork'&&holdProbeAck){receipt.originalProbeReply=observed;const lose=await new Promise<boolean>(resolve=>{releaseProbeAck=resolve});holdProbeAck=false;if(lose)throw new Error('Private fixture lost the original probe ACK; inspect the same operation')}
   return observed
@@ -197,7 +198,7 @@ async function run() {
  }
  if(selectedCase==='settings'){await settingsCase({phase,directory,window,evaluate,result,receipt,probeAck});receipt.businessPassed=true;receipt.passed=true;return}
  if (selectedCase === 'survey-browsing') {
-  await surveyBrowsingCase({ phase, directory, window, evaluate, result, receipt, pageUrl, holdProfileRead: holdSurveyProfileRead })
+  await surveyBrowsingCase({ phase, directory, window, evaluate, result, receipt, pageUrl, holdSurveyReply })
   receipt.businessPassed = true; receipt.passed = true; return
  }
  if (selectedCase === 'settings-layout') {

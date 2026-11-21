@@ -112,29 +112,42 @@ it('system-open: the framework appears before Core acknowledgement, while Native
     flow.ingress.receive('https://system-latency.invalid/ack')
     await vi.waitFor(() => expect(blocked).toBe(true))
     expect(useAppStore.getState().mainSurface).toBe('survey'); expect(nativeStarted).toBe(false)
+    expect(useAppStore.getState().surveyPageOpening).toEqual({ url: 'https://system-latency.invalid/ack' })
+    expect(useAppStore.getState().surveyZoneSelection).toBeNull()
     durableGate.release(); await vi.waitFor(() => expect(nativeStarted).toBe(true))
+    expect(useAppStore.getState().surveyPageOpening).toEqual({ url: 'https://system-latency.invalid/ack' })
+    expect(useAppStore.getState().surveyZoneSelection).toBeNull()
     nativeGate.release(); await vi.waitFor(() => expect(flow.outcomes).toHaveLength(1))
     expect(flow.outcomes[0].state).toBe('opened')
-    receipt('durable-fence', { frameworkBeforeAck: true, nativeAfterExactAck: true })
+    expect(useAppStore.getState().surveyPageOpening).toBeNull()
+    receipt('durable-fence', { targetBeforeAck: true, launcherUnselected: true, nativeAfterExactAck: true })
   } finally { durableGate.release(); nativeGate.release(); flow.ingress.unavailable() }
 })
 
 it('system-open: an attached original Browser becomes visible before its reference save acknowledgement, without stealing a later user choice', async () => {
-  const flushGate = gate(); let blocked = false
-  fixture.flush.mockImplementation(async () => {
-    if (useAppStore.getState().surveyPageReferences.length && !blocked) { blocked = true; await flushGate.promise }
+  const saved = gate(), register = useAppStore.getState().registerSurveyBrowserPage
+  let browserId: string | undefined
+  useAppStore.setState({
+    async registerSurveyBrowserPage(reference, profileId, onApplied) {
+      const receipt = await register(reference, profileId, onApplied)
+      browserId = reference.browserId
+      await saved.promise
+      return receipt
+    }
   })
   vi.spyOn(api.browser, 'create').mockImplementation(async (id, url) => snapshot(id, url))
   const flow = system()
   try {
     flow.ingress.receive('https://system-latency.invalid/prefs')
-    await vi.waitFor(() => expect(blocked).toBe(true))
-    expect(useAppStore.getState().surveyZoneSelection).toMatchObject({ kind: 'page' })
+    await vi.waitFor(() => expect(browserId).toBeTypeOf('string'))
+    expect(flow.outcomes).toEqual([])
+    expect(useAppStore.getState().surveyZoneSelection).toMatchObject({ kind: 'page', browserId })
+    expect(useAppStore.getState().surveyPageOpening).toBeNull()
     expect(useAppStore.getState().mainSurface).toBe('survey')
-    flow.navigate(); flushGate.release(); await vi.waitFor(() => expect(flow.outcomes).toHaveLength(1))
+    flow.navigate(); saved.release(); await vi.waitFor(() => expect(flow.outcomes).toHaveLength(1))
     expect(useAppStore.getState().mainSurface).toBe('board')
     receipt('later-choice', { exactBrowserVisibleBeforePreferenceAck: true, laterUserChoiceKept: true })
-  } finally { flushGate.release(); flow.ingress.unavailable() }
+  } finally { saved.release(); flow.ingress.unavailable() }
 })
 
 it('system-open: a slow first Native creation does not block the next link, and late first completion keeps both exact references and the newer page', async () => {

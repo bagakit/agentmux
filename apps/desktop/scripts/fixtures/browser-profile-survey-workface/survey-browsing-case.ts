@@ -3,10 +3,10 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { WebContentsView, type BrowserWindow } from 'electron'
 
-export async function surveyBrowsingCase({ phase, directory, window, evaluate, result, receipt, pageUrl, holdProfileRead }: {
+export async function surveyBrowsingCase({ phase, directory, window, evaluate, result, receipt, pageUrl, holdSurveyReply }: {
   phase: string; directory: string; window: BrowserWindow; evaluate(expression: string): Promise<any>
   result(args: string[]): Promise<any>; receipt: any; pageUrl: string
-  holdProfileRead(): { arrived: Promise<void>; release(): void }
+  holdSurveyReply(channel: 'browser:readProfiles' | 'browser:create'): { arrived: Promise<void>; release(): void }
 }) {
   const contents = window.webContents
   contents.debugger.attach('1.3')
@@ -30,6 +30,34 @@ export async function surveyBrowsingCase({ phase, directory, window, evaluate, r
       ...point, type, ...(type === 'mouseMoved' ? {} : { button: 'left', clickCount: 1 })
     })
   }
+  const startFrameObservation = () => evaluate(`(() => {
+    const probe = { frames: [], active: true };
+    window.surveyFrameProbe = probe;
+    const visible = (selector, home) => [...home.querySelectorAll(selector)].find(node =>
+      node.checkVisibility({ visibilityProperty: true, opacityProperty: true }));
+    const sample = () => {
+      const home = document.getElementById('survey-surface-home');
+      if (home?.checkVisibility()) {
+        const browser = visible('[data-browser-surface]', home);
+        const frame = visible('.browser-start-page', home) ? 'start' : visible('.launch-surface', home) ? 'launcher'
+          : visible('[data-survey-opening-page]', home) ? 'opening' : browser ? 'browser:' + browser.dataset.browserSurface : 'empty';
+        if (probe.frames.at(-1) !== frame) probe.frames.push(frame);
+      }
+      if (probe.active) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  })()`)
+  const exactBrowserFrame = (browserId: string) => `Boolean([...document.querySelectorAll(${JSON.stringify(`#survey-surface-home [data-browser-surface="${browserId}"]` )})].find(node =>
+    node.checkVisibility({ visibilityProperty: true, opacityProperty: true })))`
+  const finishFrameObservation = async (browserId: string) => {
+    await wait(exactBrowserFrame(browserId))
+    const frames = await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
+      window.surveyFrameProbe.active = false; resolve(window.surveyFrameProbe.frames)
+    })))`)
+    assert.deepEqual(frames, ['opening', 'browser:' + browserId], 'Survey must paint only the exact opening status followed by its Browser')
+    return frames
+  }
+  const waitForOpening = () => wait('document.querySelector("#survey-surface-home [data-survey-opening-page]")?.checkVisibility()')
   const capture = async (scene: string, theme: 'light' | 'dark', width: number, height: number) => {
     window.setContentSize(width, height)
     await evaluate(`profileSurveyNative.appearance(${JSON.stringify(theme)})`)
@@ -49,7 +77,18 @@ export async function surveyBrowsingCase({ phase, directory, window, evaluate, r
   const identityPath = join(directory, 'survey-browsing-identity.json')
   if (phase === 'first') {
     assert.deepEqual(await getSettings(), { reuseOpenPages: true, pageGrouping: 'none', groupGapMinutes: 30 })
-    const first = await open(pageUrl + '?source=one#evidence')
+    const heldCreate = holdSurveyReply('browser:create')
+    await startFrameObservation()
+    const firstPending = open(pageUrl + '?source=one#evidence')
+    try {
+      await Promise.race([heldCreate.arrived, firstPending.then(value => { throw Error('Browser create completed before hold: ' + JSON.stringify(value)) })])
+      await waitForOpening()
+      assert.equal((await profileSelection()).selection, null)
+      await capture('opening-new-page', 'light', 1180, 800)
+    } finally { heldCreate.release() }
+    const first = await firstPending
+    assert.equal(first.state, 'opened', JSON.stringify(first))
+    receipt.newPageTransition = await finishFrameObservation(first.browserId)
     const second = await open(pageUrl + '?source=two#evidence')
     const localHost = new URL(pageUrl)
     localHost.hostname = 'localhost'
@@ -70,18 +109,23 @@ export async function surveyBrowsingCase({ phase, directory, window, evaluate, r
     const switchStarted = performance.now()
     await click('[aria-label="Survey: browse and explore"]')
     await wait(visibleSurvey)
+    await wait(exactBrowserFrame(third.browserId))
     assert.equal((await profileSelection()).selection.browserId, third.browserId)
     receipt.manualSurveySwitchMs = performance.now() - switchStarted
     await switchToSpace()
-    const held = holdProfileRead(), started = performance.now()
+    const held = holdSurveyReply('browser:readProfiles')
+    await startFrameObservation()
+    const started = performance.now()
     const repeated = open(pageUrl + '?source=one#evidence')
     try {
-      await held.arrived
-      await wait(visibleSurvey)
+      await Promise.race([held.arrived, repeated.then(value => { throw Error('Profile read completed before hold: ' + JSON.stringify(value)) })])
+      await waitForOpening()
       assert.deepEqual((await profileSelection()).selection, { kind: 'page', browserId: third.browserId, regionId: third.reference.regionId })
       receipt.surfaceBeforeProfileReadback = { elapsedMs: performance.now() - started, retainedBrowserId: third.browserId }
+      await capture('opening-existing-page', 'dark', 880, 580)
     } finally { held.release() }
     assert.deepEqual(await repeated, first, 'The repeated link must return the original Browser and Region')
+    receipt.existingPageTransition = await finishFrameObservation(first.browserId)
     assert.deepEqual(await pageReferences(), original)
     assert.equal(receipt.ipc.filter((entry: { channel: string }) => entry.channel === 'browser:create').length, creates)
     assert.equal(receipt.ipc.filter((entry: { channel: string }) => entry.channel === 'browser:navigate').length, navigations)
